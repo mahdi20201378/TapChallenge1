@@ -1,16 +1,13 @@
-plugins {
-    id 'com.android.application'
-}
+plugins { id 'com.android.application' }
 
 android {
-    namespace 'com.example.tapchallenge'
+    namespace 'com.jarvis.mobile'
     compileSdk 35
-
     defaultConfig {
-        applicationId 'com.example.tapchallenge'
+        applicationId 'com.jarvis.mobile'
         minSdk 23
         targetSdk 35
         versionCode 1
-        versionName '1.0'
+        versionName '1.0.0'
     }
 }
