@@ -61,7 +61,7 @@ public class MainActivity extends Activity {
         keyInput.setHintTextColor(Color.GRAY); keyInput.setHint("Your Gemini API key"); keyInput.setInputType(129);
         root.addView(keyInput,new LinearLayout.LayoutParams(-1,dp(52)));
         Button save=new Button(this); save.setText("Save API key securely"); root.addView(save);
-        save.setOnClickListener(v->{try { saveKey(keyInput.getText().toString().trim()); keyInput.setText(""); status.setText("API key saved on this device.");} catch(Exception e){status.setText("Could not save API key: "+e.getMessage());}});
+        save.setOnClickListener(v->{try { boolean secure=saveKey(keyInput.getText().toString().trim()); keyInput.setText(""); status.setText(secure ? "API key saved with Android Keystore encryption." : "API key saved in private app storage. Device Keystore encryption is unavailable.");} catch(Exception e){status.setText("Could not save API key: "+e.getMessage());}});
         status=label("Waiting for API key",12,Color.LTGRAY); root.addView(status);
         ScrollView scroll=new ScrollView(this); messages=new LinearLayout(this); messages.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(messages); LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-1,0,1); sp.topMargin=dp(12); sp.bottomMargin=dp(10); root.addView(scroll,sp);
@@ -125,14 +125,25 @@ public class MainActivity extends Activity {
         gen.init(new android.security.keystore.KeyGenParameterSpec.Builder(ALIAS,android.security.keystore.KeyProperties.PURPOSE_ENCRYPT|android.security.keystore.KeyProperties.PURPOSE_DECRYPT).setBlockModes("GCM").setEncryptionPaddings("NoPadding").build());
         return gen.generateKey();
     }
-    private void saveKey(String value) throws Exception {
+    private boolean saveKey(String value) throws Exception {
         if(value.isEmpty()) throw new Exception("API key is empty");
-        byte[] iv=new byte[12]; new SecureRandom().nextBytes(iv); Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
-        cipher.init(Cipher.ENCRYPT_MODE,getSecretKey(),new GCMParameterSpec(128,iv)); byte[] encrypted=cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
-        getSharedPreferences(PREFS,0).edit().putString("iv",Base64.encodeToString(iv,Base64.NO_WRAP)).putString("data",Base64.encodeToString(encrypted,Base64.NO_WRAP)).apply();
+        android.content.SharedPreferences p=getSharedPreferences(PREFS,0);
+        try {
+            byte[] iv=new byte[12]; new SecureRandom().nextBytes(iv); Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE,getSecretKey(),new GCMParameterSpec(128,iv)); byte[] encrypted=cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
+            p.edit().remove("fallback_key").putString("iv",Base64.encodeToString(iv,Base64.NO_WRAP)).putString("data",Base64.encodeToString(encrypted,Base64.NO_WRAP)).apply();
+            return true;
+        } catch (Exception keystoreError) {
+            // Compatibility fallback for devices whose Keystore rejects app-generated key IDs.
+            // This remains inside app-private storage but is not Keystore-encrypted.
+            p.edit().remove("iv").remove("data").putString("fallback_key",value).apply();
+            return false;
+        }
     }
     private String loadKey() throws Exception {
-        android.content.SharedPreferences p=getSharedPreferences(PREFS,0); String ivs=p.getString("iv",null), data=p.getString("data",null); if(ivs==null||data==null)return null;
+        android.content.SharedPreferences p=getSharedPreferences(PREFS,0);
+        String fallback=p.getString("fallback_key",null); if(fallback!=null&&!fallback.isEmpty()) return fallback;
+        String ivs=p.getString("iv",null), data=p.getString("data",null); if(ivs==null||data==null)return null;
         Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.DECRYPT_MODE,getSecretKey(),new GCMParameterSpec(128,Base64.decode(ivs,Base64.NO_WRAP)));
         return new String(cipher.doFinal(Base64.decode(data,Base64.NO_WRAP)),StandardCharsets.UTF_8);
     }
